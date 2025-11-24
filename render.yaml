@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: bizflow-backend
+    env: node
+    plan: free
+    buildCommand: cd backend && npm install
+    startCommand: cd backend && node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: bizflow-database
+          property: connectionString
+
+  - type: web
+    name: bizflow-frontend
+    env: static
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: ./frontend/build
+    envVars:
+      - key: REACT_APP_API_URL
+        value: https://bizflow-backend.onrender.com
+
+databases:
+  - name: bizflow-database
+    plan: free
+    databaseName: bizflow
+    user: bizflow_user
