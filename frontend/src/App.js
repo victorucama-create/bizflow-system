@@ -39,11 +39,11 @@ function App() {
       <Routes>
         <Route 
           path="/login" 
-          element={!user ? <Login /> : <Navigate to="/dashboard" />} 
+          element={!user ? <Login /> : <Navigate to="/dashboard" replace />} 
         />
         <Route 
           path="/" 
-          element={user ? <Layout /> : <Navigate to="/login" />}
+          element={user ? <Layout /> : <Navigate to="/login" replace />}
         >
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="pos" element={<POS />} />
@@ -51,8 +51,12 @@ function App() {
           <Route path="customers" element={<Customers />} />
           <Route path="finance" element={<Finance />} />
           <Route path="documents" element={<Documents />} />
-          <Route index element={<Navigate to="/dashboard" />} />
+          <Route index element={<Navigate to="/dashboard" replace />} />
         </Route>
+        
+        {/* Redirecionamento para login se rota não existe */}
+        <Route path="*" element={<Navigate to="/login" replace />} />
+        <Route path="/auth/login" element={<Navigate to="/login" replace />} />
       </Routes>
       <ToastContainer
         position="top-right"
