@@ -1,10 +1,12 @@
+# render.yaml para Blueprint
 services:
   - type: web
     name: bizflow-backend
     env: node
     plan: free
-    buildCommand: cd backend && npm install
-    startCommand: cd backend && node server.js
+    region: oregon
+    buildCommand: npm install
+    startCommand: node server.js
     envVars:
       - key: NODE_ENV
         value: production
@@ -14,18 +16,26 @@ services:
         fromDatabase:
           name: bizflow-database
           property: connectionString
+    rootDir: backend
 
-  - type: web
+  - type: static
     name: bizflow-frontend
-    env: static
-    buildCommand: cd frontend && npm install && npm run build
-    staticPublishPath: ./frontend/build
+    plan: free
+    region: oregon
+    buildCommand: |
+      npm install &&
+      CI=false npm run build
+    staticPublishPath: ./build
     envVars:
       - key: REACT_APP_API_URL
         value: https://bizflow-backend.onrender.com
+      - key: CI
+        value: false
+    rootDir: frontend
 
 databases:
   - name: bizflow-database
     plan: free
+    region: oregon
     databaseName: bizflow
     user: bizflow_user
