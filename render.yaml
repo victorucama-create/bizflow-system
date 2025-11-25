@@ -20,7 +20,6 @@ services:
   - type: web
     name: bizflow-frontend
     env: static
-    plan: free
     buildCommand: npm install && CI=false npm run build
     staticPublishPath: ./build
     envVars:
