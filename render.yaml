@@ -1,37 +1,24 @@
 services:
   - type: web
-    name: bizflow-backend
+    name: bizflow-system
     env: node
     plan: free
-    region: oregon
-    buildCommand: npm install
-    startCommand: node server.js
+    buildCommand: cd backend && npm install
+    startCommand: cd backend && npm start
     envVars:
       - key: NODE_ENV
         value: production
+      - key: MONGODB_URI
+        fromDatabase:
+          name: bizflow-db
+          property: connectionString
       - key: JWT_SECRET
         generateValue: true
-      - key: DATABASE_URL
-        fromDatabase:
-          name: bizflow-database
-          property: connectionString
-    rootDir: backend
-
-  - type: web
-    name: bizflow-frontend
-    env: static
-    buildCommand: npm install && CI=false npm run build
-    staticPublishPath: ./build
-    envVars:
-      - key: REACT_APP_API_URL
-        value: https://bizflow-backend.onrender.com
-      - key: CI
-        value: false
-    rootDir: frontend
+      - key: JWT_EXPIRES_IN
+        value: 7d
 
 databases:
-  - name: bizflow-database
+  - name: bizflow-db
     plan: free
-    region: oregon
-    databaseName: bizflow
-    user: bizflow_user
+    type: mongodb
+    version: 6.0
