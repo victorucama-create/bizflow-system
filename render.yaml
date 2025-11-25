@@ -1,4 +1,3 @@
-# render.yaml para Blueprint
 services:
   - type: web
     name: bizflow-backend
@@ -18,17 +17,19 @@ services:
           property: connectionString
     rootDir: backend
 
-  - type: static
+  - type: web
     name: bizflow-frontend
+    env: static
     plan: free
     region: oregon
-    buildCommand: |
-      npm install &&
-      CI=false npm run build
+    buildCommand: npm install && CI=false npm run build
     staticPublishPath: ./build
     envVars:
       - key: REACT_APP_API_URL
-        value: https://bizflow-backend.onrender.com
+        fromService:
+          name: bizflow-backend
+          type: web
+          property: host
       - key: CI
         value: false
     rootDir: frontend
