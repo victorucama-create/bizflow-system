@@ -1,12 +1,20 @@
-require('dotenv').config();
-const app = require('./src/app');
-const connectDB = require('./src/config/database'); // <-- CORRETO
+const mongoose = require('mongoose');
 
-const PORT = process.env.PORT || 5000;
+const connectDB = async () => {
+    try {
+        const conn = await mongoose.connect(
+            process.env.MONGODB_URI || 'mongodb://localhost:27017/bizflow',
+            {
+                useNewUrlParser: true,
+                useUnifiedTopology: true,
+            }
+        );
 
-// Conectar ao banco de dados
-connectDB();
+        console.log(`📦 MongoDB Conectado: ${conn.connection.host}`);
+    } catch (error) {
+        console.error('❌ Erro ao conectar com MongoDB:', error);
+        process.exit(1);
+    }
+};
 
-app.listen(PORT, () => {
-    console.log(`🚀 Servidor BizFlow rodando na porta ${PORT}`);
-});
+module.exports = connectDB;
