@@ -21,15 +21,11 @@ services:
     name: bizflow-frontend
     env: static
     plan: free
-    region: oregon
     buildCommand: npm install && CI=false npm run build
     staticPublishPath: ./build
     envVars:
       - key: REACT_APP_API_URL
-        fromService:
-          name: bizflow-backend
-          type: web
-          property: host
+        value: https://bizflow-backend.onrender.com
       - key: CI
         value: false
     rootDir: frontend
