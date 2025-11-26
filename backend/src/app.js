@@ -12,6 +12,7 @@ const customerRoutes = require('./routes/customers');
 const saleRoutes = require('./routes/sales');
 const inventoryRoutes = require('./routes/inventory');
 const documentRoutes = require('./routes/documents');
+const subscriptionRoutes = require('./routes/subscription'); // NOVA ROTA
 
 const app = express();
 
@@ -26,8 +27,10 @@ const limiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     skip: (req) => {
-        // Pular rate limiting para health checks
-        return req.url === '/health' || req.url === '/api/health';
+        // Pular rate limiting para health checks e webhooks
+        return req.url === '/health' || 
+               req.url === '/api/health' ||
+               req.url === '/api/subscription/webhook';
     }
 });
 
@@ -42,6 +45,16 @@ const authLimiter = rateLimit({
     skipSuccessfulRequests: true
 });
 
+// Rate limiting para endpoints de pagamento
+const paymentLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutos
+    max: 10, // Limite mais baixo para pagamentos
+    message: {
+        success: false,
+        error: 'Muitas tentativas de pagamento. Tente novamente em 15 minutos.'
+    }
+});
+
 // Middlewares de segurança
 app.use(helmet({
     contentSecurityPolicy: {
@@ -50,7 +63,8 @@ app.use(helmet({
             styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
             fontSrc: ["'self'", "https://cdnjs.cloudflare.com"],
             scriptSrc: ["'self'", "'unsafe-inline'"],
-            imgSrc: ["'self'", "data:", "https:"]
+            imgSrc: ["'self'", "data:", "https:"],
+            connectSrc: ["'self'", "https://api.stripe.com"] // Para futura integração com Stripe
         }
     },
     crossOriginEmbedderPolicy: false
@@ -59,12 +73,16 @@ app.use(helmet({
 app.use(limiter);
 app.use(cors); // Usar configuração CORS personalizada
 
-// Rate limiting específico para autenticação
+// Rate limiting específico para endpoints sensíveis
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
 app.use('/api/auth/forgot-password', authLimiter);
+app.use('/api/subscription/upgrade', paymentLimiter); // NOVO RATE LIMITING
 
-// Middlewares básicos
+// Middleware para webhook do Stripe (raw body)
+app.use('/api/subscription/webhook', express.raw({ type: 'application/json' }));
+
+// Middlewares básicos para outras rotas
 app.use(express.json({ 
     limit: '10mb',
     verify: (req, res, buf) => {
@@ -79,7 +97,7 @@ app.use(express.urlencoded({
 // Logging de requests (apenas em desenvolvimento)
 if (process.env.NODE_ENV !== 'production') {
     app.use((req, res, next) => {
-        console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+        console.log(`${new Date().toISOString()} - ${req.method} ${req.url} - IP: ${req.ip}`);
         next();
     });
 }
@@ -122,6 +140,7 @@ app.use('/api/customers', customerRoutes);
 app.use('/api/sales', saleRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/documents', documentRoutes);
+app.use('/api/subscription', subscriptionRoutes); // NOVA ROTA ADICIONADA
 
 // Rota para servir o frontend (SPA)
 app.get('*', (req, res, next) => {
@@ -141,7 +160,17 @@ app.use('*', (req, res) => {
             success: false,
             message: 'Endpoint da API não encontrado',
             path: req.originalUrl,
-            method: req.method
+            method: req.method,
+            availableEndpoints: [
+                '/api/auth',
+                '/api/users', 
+                '/api/products',
+                '/api/customers',
+                '/api/sales',
+                '/api/inventory',
+                '/api/documents',
+                '/api/subscription'
+            ]
         });
     }
     
@@ -193,6 +222,24 @@ app.use((err, req, res, next) => {
         return res.status(401).json({
             success: false,
             message: 'Token expirado'
+        });
+    }
+
+    // Erro de limite de plano
+    if (err.message && err.message.includes('Limite')) {
+        return res.status(403).json({
+            success: false,
+            message: err.message,
+            code: 'PLAN_LIMIT_EXCEEDED'
+        });
+    }
+
+    // Erro de pagamento
+    if (err.message && err.message.includes('pagamento')) {
+        return res.status(402).json({
+            success: false,
+            message: err.message,
+            code: 'PAYMENT_FAILED'
         });
     }
 
