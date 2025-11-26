@@ -453,4 +453,58 @@ class ApprovalFlowManager {
 
     showCustomModal(title, content, onConfirm = null) {
         const modal = document.createElement('div');
-        modal.className
+        modal.className = 'modal';
+        modal.style.display = 'flex';
+        
+        modal.innerHTML = `
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 class="modal-title">${title}</h3>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    ${content}
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-light" id="modal-cancel">Cancelar</button>
+                    ${onConfirm ? `<button class="btn btn-primary" id="modal-confirm">Confirmar</button>` : ''}
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        // Event listeners
+        modal.querySelector('.modal-close').addEventListener('click', () => modal.remove());
+        modal.querySelector('#modal-cancel').addEventListener('click', () => modal.remove());
+        
+        if (onConfirm) {
+            modal.querySelector('#modal-confirm').addEventListener('click', () => {
+                onConfirm();
+                modal.remove();
+            });
+        }
+
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) modal.remove();
+        });
+    }
+
+    showLoading(message) {
+        console.log('Loading:', message);
+    }
+
+    hideLoading() {
+        // Implementar
+    }
+}
+
+// Inicializar quando a aplicação carregar
+document.addEventListener('DOMContentLoaded', () => {
+    window.ApprovalFlowManager = new ApprovalFlowManager();
+});
+
+// Adicionar ao objeto global BizFlow
+if (window.BizFlow) {
+    window.BizFlow.ApprovalFlowManager = ApprovalFlowManager;
+}
