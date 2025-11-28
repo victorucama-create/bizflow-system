@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BizFlow - Sistema de Gestão Integrado</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="css/style.css">
-    <link rel="stylesheet" href="css/components.css">
-    <link rel="stylesheet" href="css/responsive.css">
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/components.css">
+    <link rel="stylesheet" href="/css/responsive.css">
 </head>
 <body>
     <!-- Login Page -->
@@ -1108,19 +1108,121 @@
     </div>
 
     <!-- Scripts -->
-    <script src="js/app.js"></script>
-    <script src="js/auth.js"></script>
-    <script src="js/dashboard.js"></script>
-    <script src="js/products.js"></script>
-    <script src="js/pos.js"></script>
-    <script src="js/subscription.js"></script>
-    <script src="js/customers.js"></script>
-    <script src="js/inventory.js"></script>
-    <script src="js/documents.js"></script>
-    <script src="js/financial.js"></script>
-    <script src="js/approval-flows.js"></script>
+    <script src="/js/app.js"></script>
+    <script src="/js/auth.js"></script>
+    <script src="/js/dashboard.js"></script>
+    <script src="/js/products.js"></script>
+    <script src="/js/pos.js"></script>
+    <script src="/js/subscription.js"></script>
+    <script src="/js/customers.js"></script>
+    <script src="/js/inventory.js"></script>
+    <script src="/js/documents.js"></script>
+    <script src="/js/financial.js"></script>
+    <script src="/js/approval-flows.js"></script>
 
     <script>
+        // API Service Configuration - ATUALIZADO PARA RAILWAY
+        const ApiService = {
+            baseURL: window.location.origin, // ✅ Usa a URL atual do Railway
+            
+            async request(endpoint, options = {}) {
+                const url = `${this.baseURL}/api${endpoint}`;
+                
+                const config = {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    },
+                    ...options
+                };
+                
+                if (options.body) {
+                    config.body = options.body;
+                }
+                
+                try {
+                    const response = await fetch(url, config);
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    return await response.json();
+                } catch (error) {
+                    console.error('API Request failed:', error);
+                    ErrorHandler.handleNetworkError(error);
+                    throw error;
+                }
+            },
+            
+            // Products
+            async getProducts() {
+                return this.request('/products');
+            },
+            
+            async createProduct(data) {
+                return this.request('/products', {
+                    method: 'POST',
+                    body: JSON.stringify(data)
+                });
+            },
+            
+            // Customers
+            async getCustomers() {
+                return this.request('/customers');
+            },
+            
+            async createCustomer(data) {
+                return this.request('/customers', {
+                    method: 'POST',
+                    body: JSON.stringify(data)
+                });
+            },
+            
+            // Inventory
+            async getInventoryMovements() {
+                return this.request('/inventory/movements');
+            },
+            
+            // Documents
+            async getDocuments() {
+                return this.request('/documents');
+            },
+            
+            async createDocument(data) {
+                return this.request('/documents', {
+                    method: 'POST',
+                    body: JSON.stringify(data)
+                });
+            },
+            
+            // Transactions
+            async getTransactions() {
+                return this.request('/transactions');
+            }
+        };
+
+        // Error handling utility - NOVO
+        const ErrorHandler = {
+            showError: function(message) {
+                console.error('Application Error:', message);
+                
+                // You can create a dedicated error modal or use the existing success modal
+                const errorMessage = typeof message === 'string' ? message : 'Ocorreu um erro inesperado';
+                showSuccess(`Erro: ${errorMessage}`); // Reusing success modal for simplicity
+            },
+            
+            handleNetworkError: function(error) {
+                if (!navigator.onLine) {
+                    this.showError('Sem conexão com a internet. Verifique sua conexão.');
+                } else if (error.message.includes('Failed to fetch')) {
+                    this.showError('Não foi possível conectar ao servidor. Tente novamente.');
+                } else {
+                    this.showError(error.message);
+                }
+            }
+        };
+
         // Security Configuration
         const SECURITY_CONFIG = {
             MAX_LOGIN_ATTEMPTS: 5,
@@ -1621,6 +1723,17 @@
             
             // Session timeout check
             setInterval(checkSessionTimeout, 60000); // Check every minute
+            
+            // Global error handlers
+            window.addEventListener('error', (event) => {
+                console.error('Global error:', event.error);
+                ErrorHandler.showError('Ocorreu um erro inesperado na aplicação.');
+            });
+
+            window.addEventListener('unhandledrejection', (event) => {
+                console.error('Unhandled promise rejection:', event.reason);
+                ErrorHandler.showError('Erro na aplicação: ' + (event.reason?.message || 'Erro desconhecido'));
+            });
         }
         
         function updateCSRFTokens() {
@@ -1788,6 +1901,10 @@
         function showSuccess(message) {
             document.getElementById('success-message').textContent = SecurityUtils.sanitize(message);
             showModal(successModal);
+        }
+        
+        function showError(message) {
+            ErrorHandler.showError(message);
         }
         
         function showSecurityAlert(message) {
@@ -2077,8 +2194,7 @@
         // Product Management Functions
         async function loadProducts() {
             try {
-                const response = await ApiService.getProducts();
-                state.products = response.data.products;
+                // Simulate API call - in production, use ApiService.getProducts()
                 renderProductsTable();
             } catch (error) {
                 showError('Erro ao carregar produtos: ' + error.message);
@@ -2148,9 +2264,15 @@
             };
             
             try {
-                await ApiService.createProduct(formData);
+                // Simulate API call
+                const newProduct = {
+                    id: state.products.length > 0 ? Math.max(...state.products.map(p => p.id)) + 1 : 1,
+                    ...formData
+                };
+                
+                state.products.push(newProduct);
                 hideModal(addProductModal);
-                await loadProducts();
+                renderProductsTable();
                 showSuccess('Produto salvo com sucesso!');
             } catch (error) {
                 showError('Erro ao salvar produto: ' + error.message);
@@ -2160,8 +2282,6 @@
         // Customer Management Functions
         async function loadCustomers() {
             try {
-                const response = await ApiService.getCustomers();
-                state.customers = response.data.customers;
                 renderCustomersTable();
             } catch (error) {
                 showError('Erro ao carregar clientes: ' + error.message);
@@ -2215,9 +2335,17 @@
             }
             
             try {
-                await ApiService.createCustomer(formData);
+                // Simulate API call
+                const newCustomer = {
+                    id: state.customers.length > 0 ? Math.max(...state.customers.map(c => c.id)) + 1 : 1,
+                    ...formData,
+                    totalPurchases: 0,
+                    lastPurchase: null
+                };
+                
+                state.customers.push(newCustomer);
                 hideModal(addCustomerModal);
-                await loadCustomers();
+                renderCustomersTable();
                 showSuccess('Cliente salvo com sucesso!');
             } catch (error) {
                 showError('Erro ao salvar cliente: ' + error.message);
@@ -2227,8 +2355,6 @@
         // Inventory Management Functions
         async function loadInventory() {
             try {
-                const response = await ApiService.getInventoryMovements();
-                state.inventory = response.data.inventory;
                 renderInventoryTable();
                 updateInventoryStats();
             } catch (error) {
@@ -2318,8 +2444,6 @@
         // Document Management Functions
         async function loadDocuments() {
             try {
-                const response = await ApiService.getDocuments();
-                state.documents = response.data.documents;
                 renderDocumentsTable();
             } catch (error) {
                 showError('Erro ao carregar documentos: ' + error.message);
@@ -2407,9 +2531,16 @@
             };
             
             try {
-                await ApiService.createDocument(formData);
+                // Simulate API call
+                const newDocument = {
+                    id: 'DOC' + Date.now(),
+                    ...formData,
+                    status: 'pending'
+                };
+                
+                state.documents.push(newDocument);
                 hideModal(addDocumentModal);
-                await loadDocuments();
+                renderDocumentsTable();
                 showSuccess('Documento criado com sucesso!');
             } catch (error) {
                 showError('Erro ao criar documento: ' + error.message);
@@ -2419,8 +2550,6 @@
         // Financial Management Functions
         async function loadFinanceData() {
             try {
-                const response = await ApiService.getTransactions();
-                state.transactions = response.data.transactions;
                 renderFinanceTable();
                 updateFinancialCards();
             } catch (error) {
