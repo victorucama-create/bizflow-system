@@ -12,6 +12,8 @@ const connectDB = async () => {
             throw new Error('MONGODB_URI não definida nas variáveis de ambiente');
         }
 
+        console.log('📡 URI do MongoDB:', process.env.MONGODB_URI.replace(/\/\/([^:]+):([^@]+)@/, '//***:***@'));
+
         const options = {
             useNewUrlParser: true,
             useUnifiedTopology: true,
@@ -26,11 +28,15 @@ const connectDB = async () => {
             heartbeatFrequencyMS: 10000,        // Heartbeat a cada 10 segundos
             maxIdleTimeMS: 30000,               // Tempo máximo ocioso
             minPoolSize: 1,                     // Pool mínimo de conexões
-            maxIdleTimeMS: 30000,               // Tempo máximo ocioso
             waitQueueTimeoutMS: 0,              // Timeout da fila de espera
         };
 
-        console.log('📡 Conectando ao MongoDB Atlas...');
+        console.log('🔧 Opções de conexão:', {
+            maxPoolSize: options.maxPoolSize,
+            serverSelectionTimeoutMS: options.serverSelectionTimeoutMS,
+            socketTimeoutMS: options.socketTimeoutMS
+        });
+
         const conn = await mongoose.connect(process.env.MONGODB_URI, options);
 
         console.log('='.repeat(50));
@@ -92,7 +98,9 @@ const connectDB = async () => {
         setInterval(async () => {
             try {
                 await mongoose.connection.db.admin().ping();
-                console.log('❤️  Health check MongoDB: OK');
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log('❤️  Health check MongoDB: OK');
+                }
             } catch (error) {
                 console.error('💔 Health check MongoDB falhou:', error.message);
             }
@@ -123,14 +131,7 @@ const connectDB = async () => {
         }, 10000);
 
         // Não encerrar o processo imediatamente em produção
-        // A aplicação pode tentar se reconectar
-        if (process.env.NODE_ENV === 'production') {
-            // Em produção, não encerre o processo, deixe tentar reconectar
-            throw error;
-        } else {
-            // Em desenvolvimento, encerre para ver o erro
-            process.exit(1);
-        }
+        throw error;
     }
 };
 
@@ -159,6 +160,8 @@ const checkDatabaseHealth = async () => {
                 status: 'healthy',
                 readyState: getReadyStateText(mongoose.connection.readyState),
                 poolSize: mongoose.connection.poolSize,
+                host: mongoose.connection.host,
+                database: mongoose.connection.name,
                 lastPing: new Date().toISOString()
             };
         } else {
