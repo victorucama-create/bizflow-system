@@ -1,0 +1,16 @@
+{
+  "name": "bizflow-system",
+  "version": "1.0.0",
+  "description": "BizFlow - Sistema de Gestão Integrado",
+  "private": true,
+  "scripts": {
+    "deploy": "cd backend && npm start",
+    "install-deps": "cd backend && npm install"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": ["bizflow", "management", "system"],
+  "author": "Victor Ucama",
+  "license": "MIT"
+}
