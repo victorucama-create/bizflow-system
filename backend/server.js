@@ -1,6 +1,6 @@
 require('dotenv').config();
 const app = require('./src/app');
-const connectDB = require('./src/config/database');
+const { connectDB, checkDatabaseHealth } = require('./src/config/database');
 
 const PORT = process.env.PORT || 5000;
 
@@ -39,8 +39,11 @@ process.on('unhandledRejection', (reason, promise) => {
 async function startServer() {
     try {
         console.log('🚀 Iniciando BizFlow System...');
+        console.log(`🌐 Ambiente: ${process.env.NODE_ENV || 'development'}`);
+        console.log(`📁 Diretório: ${process.cwd()}`);
         
         // Conectar ao banco de dados
+        console.log('🔄 Conectando ao banco de dados...');
         await connectDB();
         
         // Iniciar servidor
@@ -53,7 +56,6 @@ async function startServer() {
             console.log(`🏠 Host: 0.0.0.0 (aceita conexões externas)`);
             console.log(`🕒 Iniciado em: ${new Date().toLocaleString('pt-BR')}`);
             console.log(`🔗 URL Local: http://localhost:${PORT}`);
-            console.log(`🌍 URL Railway: https://bizflow-system.up.railway.app`);
             console.log(`👤 User: ${process.env.USER || 'N/A'}`);
             console.log(`📁 Diretório: ${process.cwd()}`);
             console.log('='.repeat(60));
@@ -77,6 +79,7 @@ async function startServer() {
             console.log(`   Plataforma: ${process.platform}`);
             console.log(`   Arquitetura: ${process.arch}`);
             console.log(`   Memória: ${Math.round(process.memoryUsage().rss / 1024 / 1024)}MB`);
+            console.log(`   PID: ${process.pid}`);
             console.log('='.repeat(60));
         });
 
@@ -96,6 +99,7 @@ async function startServer() {
             } else {
                 console.error(`🔧 Código: ${error.code}`);
                 console.error(`📝 Mensagem: ${error.message}`);
+                console.error(`🔍 Stack: ${error.stack}`);
             }
             
             console.error('='.repeat(60));
@@ -105,6 +109,38 @@ async function startServer() {
         // Health check adicional do servidor
         server.on('listening', () => {
             console.log('✅ Servidor ouvindo conexões...');
+        });
+
+        // ==================== HEALTH CHECK ENDPOINT ====================
+
+        app.get('/health', async (req, res) => {
+            try {
+                const dbHealth = await checkDatabaseHealth();
+                
+                res.status(200).json({
+                    status: 'OK',
+                    service: 'BizFlow API',
+                    timestamp: new Date().toISOString(),
+                    uptime: process.uptime(),
+                    environment: process.env.NODE_ENV || 'development',
+                    memory: process.memoryUsage(),
+                    version: '1.0.0',
+                    nodeVersion: process.version,
+                    platform: process.platform,
+                    database: dbHealth
+                });
+            } catch (error) {
+                res.status(500).json({
+                    status: 'ERROR',
+                    service: 'BizFlow API',
+                    timestamp: new Date().toISOString(),
+                    error: error.message,
+                    database: {
+                        status: 'unreachable',
+                        error: error.message
+                    }
+                });
+            }
         });
 
         // ==================== GRACEFUL SHUTDOWN ====================
@@ -142,6 +178,28 @@ async function startServer() {
         process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
         process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
+        // ==================== MONITORAMENTO DE MEMÓRIA ====================
+
+        if (process.env.NODE_ENV === 'production') {
+            setInterval(() => {
+                const memoryUsage = process.memoryUsage();
+                const memoryMB = {
+                    rss: Math.round(memoryUsage.rss / 1024 / 1024),
+                    heapTotal: Math.round(memoryUsage.heapTotal / 1024 / 1024),
+                    heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024),
+                    external: Math.round(memoryUsage.external / 1024 / 1024)
+                };
+                
+                if (memoryMB.heapUsed > 500) { // Alertar se usar mais de 500MB
+                    console.warn(`⚠️  Uso alto de memória: ${memoryMB.heapUsed}MB`);
+                }
+                
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log(`💾 Memória: ${memoryMB.heapUsed}MB usados de ${memoryMB.heapTotal}MB`);
+                }
+            }, 60000); // Verificar a cada 1 minuto
+        }
+
         return server;
 
     } catch (error) {
@@ -162,7 +220,11 @@ async function startServer() {
     }
 }
 
-// Iniciar o servidor
-startServer();
-
-module.exports = startServer;
+// Verificar se é o módulo principal
+if (require.main === module) {
+    // Iniciar o servidor apenas se este arquivo for executado diretamente
+    startServer();
+} else {
+    // Exportar para testes
+    module.exports = startServer;
+}
