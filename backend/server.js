@@ -4,105 +4,165 @@ const connectDB = require('./src/config/database');
 
 const PORT = process.env.PORT || 5000;
 
-// Conectar ao banco de dados
-connectDB();
+// ==================== MANIPULADORES DE ERRO GLOBAL ====================
 
-// Manipulador de erros não capturados
 process.on('uncaughtException', (err) => {
-    console.error('❌ Erro não capturado:', err);
-    console.log('🔄 Reiniciando servidor...');
-    process.exit(1);
-});
-
-// Manipulador de rejeições de Promise não tratadas
-process.on('unhandledRejection', (err) => {
-    console.error('❌ Rejeição de Promise não tratada:', err);
-    console.log('🔄 Reiniciando servidor...');
-    process.exit(1);
-});
-
-// Manipulador de sinal de término (SIGTERM)
-process.on('SIGTERM', () => {
-    console.log('👋 SIGTERM recebido. Encerrando servidor graciosamente...');
-    process.exit(0);
-});
-
-// Manipulador de sinal de interrupção (Ctrl+C)
-process.on('SIGINT', () => {
-    console.log('👋 SIGINT recebido. Encerrando servidor graciosamente...');
-    process.exit(0);
-});
-
-const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log('='.repeat(60));
-    console.log('🚀 BIZFLOW - SISTEMA DE GESTÃO INTEGRADO');
-    console.log('='.repeat(60));
-    console.log(`📡 Servidor rodando na porta: ${PORT}`);
-    console.log(`🌐 Ambiente: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`🕒 Iniciado em: ${new Date().toLocaleString('pt-BR')}`);
-    console.log(`🔗 URL: http://localhost:${PORT}`);
-    console.log('='.repeat(60));
+    console.error('='.repeat(60));
+    console.error('❌ ERRO NÃO CAPTURADO (Uncaught Exception):');
+    console.error('='.repeat(60));
+    console.error(`📝 Mensagem: ${err.message}`);
+    console.error(`🔧 Stack: ${err.stack}`);
+    console.error('='.repeat(60));
+    console.log('🔄 Reiniciando servidor em 5 segundos...');
     
-    // Verificar variáveis de ambiente críticas
-    if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'fallback-secret') {
-        console.warn('⚠️  AVISO: JWT_SECRET não configurado ou usando valor padrão');
-    }
-    
-    if (!process.env.MONGODB_URI) {
-        console.warn('⚠️  AVISO: MONGODB_URI não configurado - usando MongoDB local');
-    }
-});
-
-// Manipulador de erro do servidor
-server.on('error', (error) => {
-    if (error.code === 'EADDRINUSE') {
-        console.error(`❌ Porta ${PORT} já está em uso!`);
-        console.log('💡 Dica: Altere a porta via variável de ambiente PORT');
-    } else {
-        console.error('❌ Erro no servidor:', error);
-    }
-    process.exit(1);
-});
-
-// Health check endpoint (para Render.com)
-app.get('/health', (req, res) => {
-    res.status(200).json({
-        status: 'OK',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        memory: process.memoryUsage(),
-        environment: process.env.NODE_ENV || 'development'
-    });
-});
-
-// Graceful shutdown
-const gracefulShutdown = () => {
-    console.log('🔄 Iniciando shutdown gracioso...');
-    
-    server.close(() => {
-        console.log('✅ Servidor HTTP fechado');
-        
-        // Fechar conexão com MongoDB
-        const mongoose = require('mongoose');
-        if (mongoose.connection.readyState !== 0) {
-            mongoose.connection.close(false, () => {
-                console.log('✅ Conexão MongoDB fechada');
-                process.exit(0);
-            });
-        } else {
-            process.exit(0);
-        }
-    });
-
-    // Forçar fechamento após 10 segundos
     setTimeout(() => {
-        console.error('❌ Shutdown forçado após timeout');
         process.exit(1);
-    }, 10000);
-};
+    }, 5000);
+});
 
-// Listeners para graceful shutdown
-process.on('SIGTERM', gracefulShutdown);
-process.on('SIGINT', gracefulShutdown);
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('='.repeat(60));
+    console.error('❌ REJEIÇÃO DE PROMISE NÃO TRATADA:');
+    console.error('='.repeat(60));
+    console.error(`📝 Razão:`, reason);
+    console.error(`🔧 Promise:`, promise);
+    console.error('='.repeat(60));
+    console.log('🔄 Reiniciando servidor em 5 segundos...');
+    
+    setTimeout(() => {
+        process.exit(1);
+    }, 5000);
+});
 
-module.exports = server;
+// ==================== INICIALIZAÇÃO DO SERVIDOR ====================
+
+async function startServer() {
+    try {
+        console.log('🚀 Iniciando BizFlow System...');
+        
+        // Conectar ao banco de dados
+        await connectDB();
+        
+        // Iniciar servidor
+        const server = app.listen(PORT, '0.0.0.0', () => {
+            console.log('='.repeat(60));
+            console.log('🎯 BIZFLOW - SISTEMA DE GESTÃO INTEGRADO');
+            console.log('='.repeat(60));
+            console.log(`📡 Servidor rodando na porta: ${PORT}`);
+            console.log(`🌐 Ambiente: ${process.env.NODE_ENV || 'development'}`);
+            console.log(`🏠 Host: 0.0.0.0 (aceita conexões externas)`);
+            console.log(`🕒 Iniciado em: ${new Date().toLocaleString('pt-BR')}`);
+            console.log(`🔗 URL Local: http://localhost:${PORT}`);
+            console.log(`🌍 URL Railway: https://bizflow-system.up.railway.app`);
+            console.log(`👤 User: ${process.env.USER || 'N/A'}`);
+            console.log(`📁 Diretório: ${process.cwd()}`);
+            console.log('='.repeat(60));
+            
+            // Verificar variáveis de ambiente críticas
+            if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'fallback-secret') {
+                console.warn('⚠️  AVISO: JWT_SECRET não configurado ou usando valor padrão');
+            }
+            
+            if (!process.env.MONGODB_URI) {
+                console.warn('⚠️  AVISO: MONGODB_URI não configurado');
+            }
+            
+            if (!process.env.CORS_ORIGIN) {
+                console.warn('⚠️  AVISO: CORS_ORIGIN não configurado');
+            }
+
+            // Log de informações do sistema
+            console.log('💻 Informações do Sistema:');
+            console.log(`   Node.js: ${process.version}`);
+            console.log(`   Plataforma: ${process.platform}`);
+            console.log(`   Arquitetura: ${process.arch}`);
+            console.log(`   Memória: ${Math.round(process.memoryUsage().rss / 1024 / 1024)}MB`);
+            console.log('='.repeat(60));
+        });
+
+        // ==================== MANIPULADORES DO SERVIDOR ====================
+
+        server.on('error', (error) => {
+            console.error('='.repeat(60));
+            console.error('❌ ERRO NO SERVIDOR:');
+            console.error('='.repeat(60));
+            
+            if (error.code === 'EADDRINUSE') {
+                console.error(`🚫 Porta ${PORT} já está em uso!`);
+                console.log('💡 Dica: Altere a porta via variável de ambiente PORT');
+            } else if (error.code === 'EACCES') {
+                console.error(`🔒 Sem permissão para usar a porta ${PORT}`);
+                console.log('💡 Dica: Use uma porta acima de 1024');
+            } else {
+                console.error(`🔧 Código: ${error.code}`);
+                console.error(`📝 Mensagem: ${error.message}`);
+            }
+            
+            console.error('='.repeat(60));
+            process.exit(1);
+        });
+
+        // Health check adicional do servidor
+        server.on('listening', () => {
+            console.log('✅ Servidor ouvindo conexões...');
+        });
+
+        // ==================== GRACEFUL SHUTDOWN ====================
+
+        const gracefulShutdown = (signal) => {
+            console.log(`\n${'='.repeat(60)}`);
+            console.log(`👋 ${signal} recebido. Encerrando servidor graciosamente...`);
+            console.log('='.repeat(60));
+            
+            server.close(() => {
+                console.log('✅ Servidor HTTP fechado');
+                
+                // Fechar conexão com MongoDB
+                const mongoose = require('mongoose');
+                if (mongoose.connection.readyState !== 0) {
+                    mongoose.connection.close(false, () => {
+                        console.log('✅ Conexão MongoDB fechada');
+                        console.log('👋 Servidor encerrado com sucesso!');
+                        process.exit(0);
+                    });
+                } else {
+                    console.log('👋 Servidor encerrado com sucesso!');
+                    process.exit(0);
+                }
+            });
+
+            // Forçar fechamento após 30 segundos (aumentado para Railway)
+            setTimeout(() => {
+                console.error('❌ Shutdown forçado após timeout de 30 segundos');
+                process.exit(1);
+            }, 30000);
+        };
+
+        // Listeners para graceful shutdown
+        process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+        process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+        return server;
+
+    } catch (error) {
+        console.error('='.repeat(60));
+        console.error('❌ ERRO AO INICIAR SERVIDOR:');
+        console.error('='.repeat(60));
+        console.error(`📝 Mensagem: ${error.message}`);
+        console.error(`🔧 Stack: ${error.stack}`);
+        console.error('='.repeat(60));
+        
+        // Tentar reiniciar em produção
+        if (process.env.NODE_ENV === 'production') {
+            console.log('🔄 Tentando reiniciar em 10 segundos...');
+            setTimeout(startServer, 10000);
+        } else {
+            process.exit(1);
+        }
+    }
+}
+
+// Iniciar o servidor
+startServer();
+
+module.exports = startServer;
