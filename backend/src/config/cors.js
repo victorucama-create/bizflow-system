@@ -1,29 +1,49 @@
 const cors = require('cors');
 
+/**
+ * Configuração CORS personalizada para o Railway
+ */
+// Domínios permitidos
+const allowedOrigins = [
+    process.env.FRONTEND_URL,
+    process.env.CORS_ORIGIN,
+    'https://bizflow-system.up.railway.app',
+    'https://*.up.railway.app',
+    'https://*.railway.app',
+    'http://localhost:3000',
+    'http://localhost:5000',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:5000',
+    'https://bizflow-system.onrender.com'
+].filter(Boolean); // Remove valores undefined/null
+
+// Configuração CORS
 const corsOptions = {
     origin: function (origin, callback) {
         // Permitir requests sem origin (como mobile apps, curl, servidores)
         if (!origin) return callback(null, true);
         
-        const allowedOrigins = [
-            process.env.FRONTEND_URL,
-            process.env.CORS_ORIGIN,
-            'https://bizflow-system.up.railway.app',  // NOVO - URL do Railway
-            'https://*.up.railway.app',              // NOVO - Todos os subdomínios Railway
-            'http://localhost:3000',
-            'http://localhost:5000',
-            'http://127.0.0.1:3000',
-            'http://127.0.0.1:5000',
-            'https://bizflow-system.onrender.com'    // Mantenha o Render por enquanto
-        ].filter(Boolean); // Remove valores undefined/null
-
         // Log para debugging em desenvolvimento
         if (process.env.NODE_ENV !== 'production') {
-            console.log(`🌐 CORS Check - Origin: ${origin}, Allowed: ${allowedOrigins.includes(origin)}`);
+            console.log(`🌐 CORS Check - Origin: ${origin}`);
+            console.log(`📋 Allowed Origins: ${allowedOrigins.join(', ')}`);
         }
 
+        // Verificar se a origem está na lista de permitidas
+        const isAllowed = allowedOrigins.some(allowedOrigin => {
+            // Suporte para wildcards
+            if (allowedOrigin.includes('*')) {
+                const regex = new RegExp('^' + allowedOrigin.replace(/\*/g, '.*') + '$');
+                return regex.test(origin);
+            }
+            return allowedOrigin === origin;
+        });
+
         // Permitir origens da lista OU em ambiente de desenvolvimento
-        if (allowedOrigins.includes(origin) || process.env.NODE_ENV === 'development') {
+        if (isAllowed || process.env.NODE_ENV === 'development') {
+            if (process.env.NODE_ENV !== 'production') {
+                console.log(`✅ CORS permitido para: ${origin}`);
+            }
             callback(null, true);
         } else {
             console.warn(`🚫 CORS bloqueado para origem: ${origin}`);
@@ -37,12 +57,13 @@ const corsOptions = {
         'Content-Type',
         'Authorization',
         'X-Requested-With',
+        'X-API-Key',
         'Accept',
         'Origin',
         'Access-Control-Request-Method',
         'Access-Control-Request-Headers',
         'Cache-Control',
-        'X-API-Key'
+        'X-Requested-With'
     ],
     exposedHeaders: [
         'Content-Range',
@@ -56,20 +77,44 @@ const corsOptions = {
     optionsSuccessStatus: 204
 };
 
-// Exportar tanto o middleware quanto a configuração
+// Middleware CORS
 const corsMiddleware = cors(corsOptions);
 
-// Helper para debugging
+// Helper para verificar origens
+corsMiddleware.isOriginAllowed = (origin) => {
+    return allowedOrigins.some(allowedOrigin => {
+        if (allowedOrigin.includes('*')) {
+            const regex = new RegExp('^' + allowedOrigin.replace(/\*/g, '.*') + '$');
+            return regex.test(origin);
+        }
+        return allowedOrigin === origin;
+    });
+};
+
+// Helper para adicionar origens dinamicamente
+corsMiddleware.addAllowedOrigin = (origin) => {
+    if (!allowedOrigins.includes(origin)) {
+        allowedOrigins.push(origin);
+        console.log(`✅ Origem adicionada ao CORS: ${origin}`);
+    }
+};
+
+// Helper para obter origens permitidas
 corsMiddleware.getAllowedOrigins = () => {
-    return [
-        process.env.FRONTEND_URL,
-        process.env.CORS_ORIGIN,
-        'https://bizflow-system.up.railway.app',
-        'https://*.up.railway.app',
-        'http://localhost:3000',
-        'http://localhost:5000',
-        'https://bizflow-system.onrender.com'
-    ].filter(Boolean);
+    return [...allowedOrigins];
+};
+
+// Health check do CORS
+corsMiddleware.healthCheck = () => {
+    return {
+        status: 'healthy',
+        allowedOrigins: allowedOrigins,
+        config: {
+            credentials: corsOptions.credentials,
+            methods: corsOptions.methods,
+            maxAge: corsOptions.maxAge
+        }
+    };
 };
 
 module.exports = corsMiddleware;
