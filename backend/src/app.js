@@ -12,14 +12,15 @@ const customerRoutes = require('./routes/customers');
 const saleRoutes = require('./routes/sales');
 const inventoryRoutes = require('./routes/inventory');
 const documentRoutes = require('./routes/documents');
-const subscriptionRoutes = require('./routes/subscription'); // NOVA ROTA
+const subscriptionRoutes = require('./routes/subscription');
 
 const app = express();
 
-// Configuração de rate limiting mais robusta
+// ==================== CONFIGURAÇÕES DE RATE LIMITING ====================
+
 const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutos
-    max: process.env.NODE_ENV === 'production' ? 100 : 1000, // Limites diferentes por ambiente
+    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutos
+    max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || (process.env.NODE_ENV === 'production' ? 100 : 1000),
     message: {
         success: false,
         error: 'Muitas requisições deste IP, tente novamente em 15 minutos.'
@@ -30,11 +31,12 @@ const limiter = rateLimit({
         // Pular rate limiting para health checks e webhooks
         return req.url === '/health' || 
                req.url === '/api/health' ||
-               req.url === '/api/subscription/webhook';
+               req.url === '/api/subscription/webhook' ||
+               req.method === 'OPTIONS'; // Pré-flight requests
     }
 });
 
-// Rate limiting mais agressivo para autenticação
+// Rate limiting para autenticação
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutos
     max: 5, // Apenas 5 tentativas de login por IP
@@ -55,19 +57,26 @@ const paymentLimiter = rateLimit({
     }
 });
 
-// Middlewares de segurança
+// ==================== MIDDLEWARES DE SEGURANÇA ====================
+
+// Helmet com configurações otimizadas para Railway
 app.use(helmet({
     contentSecurityPolicy: {
         directives: {
             defaultSrc: ["'self'"],
-            styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
-            fontSrc: ["'self'", "https://cdnjs.cloudflare.com"],
-            scriptSrc: ["'self'", "'unsafe-inline'"],
-            imgSrc: ["'self'", "data:", "https:"],
-            connectSrc: ["'self'", "https://api.stripe.com"] // Para futura integração com Stripe
+            styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
+            fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.gstatic.com"],
+            scriptSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
+            imgSrc: ["'self'", "data:", "https:", "blob:"],
+            connectSrc: ["'self'", "https://api.stripe.com", "wss:"],
+            frameSrc: ["'self'", "https://js.stripe.com"],
+            objectSrc: ["'none'"],
+            mediaSrc: ["'self'"],
+            childSrc: ["'self'", "blob:"]
         }
     },
-    crossOriginEmbedderPolicy: false
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" } // Importante para Railway
 }));
 
 app.use(limiter);
@@ -77,32 +86,46 @@ app.use(cors); // Usar configuração CORS personalizada
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
 app.use('/api/auth/forgot-password', authLimiter);
-app.use('/api/subscription/upgrade', paymentLimiter); // NOVO RATE LIMITING
+app.use('/api/subscription/upgrade', paymentLimiter);
 
-// Middleware para webhook do Stripe (raw body)
-app.use('/api/subscription/webhook', express.raw({ type: 'application/json' }));
+// ==================== MIDDLEWARES DE REQUISIÇÃO ====================
+
+// Middleware para webhook do Stripe (raw body) - DEVE VIR ANTES DO express.json
+app.use('/api/subscription/webhook', express.raw({ 
+    type: 'application/json',
+    limit: '10mb'
+}));
 
 // Middlewares básicos para outras rotas
 app.use(express.json({ 
-    limit: '10mb',
+    limit: process.env.MAX_FILE_SIZE || '10mb',
     verify: (req, res, buf) => {
         req.rawBody = buf;
     }
 }));
 app.use(express.urlencoded({ 
     extended: true,
-    limit: '10mb'
+    limit: process.env.MAX_FILE_SIZE || '10mb'
 }));
 
 // Logging de requests (apenas em desenvolvimento)
 if (process.env.NODE_ENV !== 'production') {
     app.use((req, res, next) => {
-        console.log(`${new Date().toISOString()} - ${req.method} ${req.url} - IP: ${req.ip}`);
+        console.log(`${new Date().toISOString()} - ${req.method} ${req.url} - IP: ${req.ip} - User-Agent: ${req.get('User-Agent')}`);
+        next();
+    });
+} else {
+    // Log simplificado em produção
+    app.use((req, res, next) => {
+        if (req.url !== '/health' && req.url !== '/api/health') {
+            console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+        }
         next();
     });
 }
 
-// Health check endpoint
+// ==================== HEALTH CHECKS ====================
+
 app.get('/health', (req, res) => {
     res.status(200).json({
         status: 'OK',
@@ -111,7 +134,9 @@ app.get('/health', (req, res) => {
         uptime: process.uptime(),
         environment: process.env.NODE_ENV || 'development',
         memory: process.memoryUsage(),
-        version: '1.0.0'
+        version: '1.0.0',
+        nodeVersion: process.version,
+        platform: process.platform
     });
 });
 
@@ -120,19 +145,32 @@ app.get('/api/health', (req, res) => {
         status: 'OK',
         service: 'BizFlow API',
         timestamp: new Date().toISOString(),
-        environment: process.env.NODE_ENV || 'development'
+        environment: process.env.NODE_ENV || 'development',
+        version: '1.0.0'
     });
 });
 
-// Servir arquivos estáticos do frontend
+// ==================== SERVIR ARQUIVOS ESTÁTICOS ====================
+
 app.use(express.static(path.join(__dirname, '../../frontend'), {
     maxAge: process.env.NODE_ENV === 'production' ? '1d' : '0',
     etag: true,
     lastModified: true,
-    index: 'index.html'
+    index: 'index.html',
+    setHeaders: (res, path) => {
+        // Cache mais agressivo para assets estáticos
+        if (path.match(/\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$/)) {
+            res.setHeader('Cache-Control', 'public, max-age=86400'); // 1 dia
+        }
+        // Não cachear HTML
+        if (path.endsWith('.html')) {
+            res.setHeader('Cache-Control', 'no-cache');
+        }
+    }
 }));
 
-// API Routes
+// ==================== ROTAS DA API ====================
+
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/products', productRoutes);
@@ -140,9 +178,10 @@ app.use('/api/customers', customerRoutes);
 app.use('/api/sales', saleRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/documents', documentRoutes);
-app.use('/api/subscription', subscriptionRoutes); // NOVA ROTA ADICIONADA
+app.use('/api/subscription', subscriptionRoutes);
 
-// Rota para servir o frontend (SPA)
+// ==================== ROTA SPA (SINGLE PAGE APPLICATION) ====================
+
 app.get('*', (req, res, next) => {
     // Se a rota começar com /api, passar para o próximo middleware (404)
     if (req.path.startsWith('/api/')) {
@@ -153,7 +192,8 @@ app.get('*', (req, res, next) => {
     res.sendFile(path.join(__dirname, '../../frontend/index.html'));
 });
 
-// Middleware para rotas não encontradas (404)
+// ==================== MIDDLEWARE 404 ====================
+
 app.use('*', (req, res) => {
     if (req.originalUrl.startsWith('/api/')) {
         return res.status(404).json({
@@ -181,7 +221,8 @@ app.use('*', (req, res) => {
     });
 });
 
-// Middleware de erro global
+// ==================== MIDDLEWARE DE ERRO GLOBAL ====================
+
 app.use((err, req, res, next) => {
     console.error('❌ Erro:', {
         message: err.message,
@@ -189,6 +230,7 @@ app.use((err, req, res, next) => {
         url: req.url,
         method: req.method,
         ip: req.ip,
+        userAgent: req.get('User-Agent'),
         timestamp: new Date().toISOString()
     });
 
@@ -225,6 +267,14 @@ app.use((err, req, res, next) => {
         });
     }
 
+    // Erro CORS
+    if (err.message === 'Não permitido por CORS') {
+        return res.status(403).json({
+            success: false,
+            message: 'Origem não permitida'
+        });
+    }
+
     // Erro de limite de plano
     if (err.message && err.message.includes('Limite')) {
         return res.status(403).json({
@@ -258,5 +308,4 @@ app.use((err, req, res, next) => {
     });
 });
 
-// Exportar para uso no server.js
 module.exports = app;
