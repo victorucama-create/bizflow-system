@@ -1,0 +1,15 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "BizFlow PostgreSQL",
+      "Group": "Servers",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "postgres",
+      "Username": "bizflow_dev",
+      "SSLMode": "prefer",
+      "PassFile": "/pgpass",
+      "Comment": "Database principal do BizFlow"
+    }
+  }
+}
