@@ -1,1 +1,67 @@
+version: '3.8'
 
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: bizflow-db
+    environment:
+      POSTGRES_DB: bizflow
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    networks:
+      - bizflow-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: bizflow-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@bizflow.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - bizflow-network
+
+  backend:
+    build: .
+    container_name: bizflow-backend
+    environment:
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: bizflow
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src
+      - ./uploads:/app/uploads
+      - ./logs:/app/logs
+      - /app/node_modules
+    networks:
+      - bizflow-network
+    command: npm run dev
+
+networks:
+  bizflow-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
