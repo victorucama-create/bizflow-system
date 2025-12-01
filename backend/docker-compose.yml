@@ -1,67 +1,452 @@
 version: '3.8'
 
+# Redes
+networks:
+  bizflow-network:
+    driver: bridge
+    name: bizflow-network
+
+# Volumes
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  mongo_data:
+    driver: local
+  uploads_data:
+    driver: local
+  logs_data:
+    driver: local
+  elasticsearch_data:
+    driver: local
+  minio_data:
+    driver: local
+
+# Configurações comuns
+x-common-variables: &common-variables
+  TZ: America/Sao_Paulo
+  NODE_ENV: development
+
+x-database-variables: &database-variables
+  POSTGRES_DB: ${DB_NAME:-bizflow_dev}
+  POSTGRES_USER: ${DB_USER:-bizflow_dev}
+  POSTGRES_PASSWORD: ${DB_PASSWORD:-bizflow_dev123}
+  POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+
+x-app-variables: &app-variables
+  <<: *common-variables
+  PORT: 3000
+  DB_HOST: postgres
+  DB_PORT: 5432
+  DB_NAME: ${DB_NAME:-bizflow_dev}
+  DB_USER: ${DB_USER:-bizflow_dev}
+  DB_PASSWORD: ${DB_PASSWORD:-bizflow_dev123}
+  DB_SSL: "false"
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  MONGO_HOST: mongo
+  MONGO_PORT: 27017
+  MONGO_DB: ${MONGO_DB:-bizflow_dev}
+  ELASTICSEARCH_HOST: elasticsearch
+  ELASTICSEARCH_PORT: 9200
+  JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-in-production}
+  JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-refresh-secret-change-in-production}
+  JWT_ACCESS_EXPIRES_IN: 15m
+  JWT_REFRESH_EXPIRES_IN: 7d
+  FRONTEND_URL: http://localhost:8080
+  APP_URL: http://localhost:3000
+  SMTP_HOST: ${SMTP_HOST:-smtp.mailtrap.io}
+  SMTP_PORT: ${SMTP_PORT:-2525}
+  SMTP_USER: ${SMTP_USER:-dev_user}
+  SMTP_PASS: ${SMTP_PASS:-dev_pass}
+  SMTP_SECURE: "false"
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:-dev-encryption-key-32-chars}
+  WEBHOOK_SECRET: ${WEBHOOK_SECRET:-dev-webhook-secret}
+  DEBUG: "bizflow:*"
+  NODE_OPTIONS: "--inspect=0.0.0.0:9229 --max-old-space-size=2048"
+
 services:
+  # PostgreSQL - Banco de dados principal
   postgres:
     image: postgres:15-alpine
-    container_name: bizflow-db
+    container_name: bizflow-postgres-dev
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: bizflow
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      <<: *database-variables
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+      - ./backups:/backups:rw
     networks:
       - bizflow-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-bizflow_dev}"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
+    command: >
+      postgres
+      -c max_connections=100
+      -c shared_buffers=128MB
+      -c effective_cache_size=512MB
+      -c maintenance_work_mem=32MB
 
+  # Redis - Cache e filas
+  redis:
+    image: redis:7-alpine
+    container_name: bizflow-redis-dev
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_dev_pass}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - bizflow-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # MongoDB - Para dados não relacionais
+  mongo:
+    image: mongo:6
+    container_name: bizflow-mongo-dev
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-admin123}
+      MONGO_INITDB_DATABASE: ${MONGO_DB:-bizflow_dev}
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+      - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    networks:
+      - bizflow-network
+    command: mongod --auth --bind_ip_all
+
+  # Elasticsearch - Busca e análise
+  elasticsearch:
+    image: elasticsearch:8.8.0
+    container_name: bizflow-elasticsearch-dev
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - bizflow-network
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+
+  # MinIO - Armazenamento de arquivos
+  minio:
+    image: minio/minio
+    container_name: bizflow-minio-dev
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:-minioadmin123}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - bizflow-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # MailHog - Servidor de email para desenvolvimento
+  mailhog:
+    image: mailhog/mailhog
+    container_name: bizflow-mailhog-dev
+    restart: unless-stopped
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - bizflow-network
+
+  # Aplicação Backend
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      args:
+        NODE_ENV: development
+        PORT: 3000
+    image: bizflow-backend:dev
+    container_name: bizflow-backend-dev
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mongo:
+        condition: service_started
+      elasticsearch:
+        condition: service_started
+      minio:
+        condition: service_started
+    environment:
+      <<: *app-variables
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+      SMTP_SECURE: "false"
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_ACCESS_KEY: ${MINIO_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_PASSWORD:-minioadmin123}
+      MINIO_BUCKET: bizflow-dev
+      MINIO_USE_SSL: "false"
+    ports:
+      - "3000:3000"
+      - "9229:9229" # Node.js Inspector
+    volumes:
+      - ./src:/app/src:rw
+      - ./server.js:/app/server.js:rw
+      - ./package.json:/app/package.json:rw
+      - ./uploads_data:/app/uploads:rw
+      - ./logs_data:/app/logs:rw
+      - /app/node_modules
+    networks:
+      - bizflow-network
+    working_dir: /app
+    command: >
+      sh -c "
+        echo '🚀 Iniciando BizFlow Backend em modo desenvolvimento...' &&
+        echo '📅 Timezone: $TZ' &&
+        echo '🌍 Ambiente: $NODE_ENV' &&
+        echo '🔧 Node Options: $NODE_OPTIONS' &&
+        echo '🔄 Aguardando serviços...' &&
+        sleep 5 &&
+        echo '🗄️  Verificando banco de dados...' &&
+        npm run migrate:status &&
+        echo '🌱 Executando seeders...' &&
+        npm run seed:status || npm run seed &&
+        echo '📦 Instalando dependências...' &&
+        npm ci &&
+        echo '🚀 Iniciando servidor com nodemon...' &&
+        npm run dev
+      "
+    stdin_open: true
+    tty: true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # pgAdmin - Interface gráfica para PostgreSQL
   pgadmin:
     image: dpage/pgadmin4
-    container_name: bizflow-pgadmin
+    container_name: bizflow-pgadmin-dev
+    restart: unless-stopped
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@bizflow.com
-      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@bizflow.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin123}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
     ports:
       - "5050:80"
+    volumes:
+      - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
+      - pgadmin_data:/var/lib/pgadmin
     depends_on:
       - postgres
     networks:
       - bizflow-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-  backend:
-    build: .
-    container_name: bizflow-backend
+  # Redis Commander - Interface gráfica para Redis
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: bizflow-redis-commander-dev
+    restart: unless-stopped
     environment:
-      NODE_ENV: development
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: bizflow
-      DB_USER: postgres
-      DB_PASSWORD: postgres
-      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+      REDIS_HOSTS: local:redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_dev_pass}
     ports:
-      - "3000:3000"
+      - "8081:8081"
     depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - ./src:/app/src
-      - ./uploads:/app/uploads
-      - ./logs:/app/logs
-      - /app/node_modules
+      - redis
     networks:
       - bizflow-network
-    command: npm run dev
 
-networks:
-  bizflow-network:
-    driver: bridge
+  # Mongo Express - Interface gráfica para MongoDB
+  mongo-express:
+    image: mongo-express
+    container_name: bizflow-mongo-express-dev
+    restart: unless-stopped
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongo
+      ME_CONFIG_MONGODB_PORT: 27017
+      ME_CONFIG_MONGODB_ENABLE_ADMIN: "true"
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_USER:-admin}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_PASSWORD:-admin123}
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: admin123
+    ports:
+      - "8082:8081"
+    depends_on:
+      - mongo
+    networks:
+      - bizflow-network
 
-volumes:
-  postgres_data:
+  # Adminer - Interface gráfica para múltiplos bancos
+  adminer:
+    image: adminer
+    container_name: bizflow-adminer-dev
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    networks:
+      - bizflow-network
+
+  # Portainer - Gerenciamento de containers
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: bizflow-portainer-dev
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9443:9443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - portainer_data:/data
+    networks:
+      - bizflow-network
+    command: -H unix:///var/run/docker.sock --http-disabled --ssl --sslcert /certs/portainer.crt --sslkey /certs/portainer.key
+
+  # Traefik - Proxy reverso com autoconfiguração
+  traefik:
+    image: traefik:v2.10
+    container_name: bizflow-traefik-dev
+    restart: unless-stopped
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.email=${TRAEFIK_EMAIL:-admin@bizflow.com}"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8088:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/letsencrypt:/letsencrypt
+      - ./traefik/config:/etc/traefik
+    networks:
+      - bizflow-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host(`traefik.localhost`)"
+      - "traefik.http.routers.api.service=api@internal"
+      - "traefik.http.routers.api.entrypoints=web"
+
+  # Prometheus - Monitoramento
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: bizflow-prometheus-dev
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - bizflow-network
+    depends_on:
+      - backend
+
+  # Grafana - Dashboards de monitoramento
+  grafana:
+    image: grafana/grafana:latest
+    container_name: bizflow-grafana-dev
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: "grafana-piechart-panel"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    ports:
+      - "3001:3000"
+    networks:
+      - bizflow-network
+    depends_on:
+      - prometheus
+
+  # Jaeger - Distributed tracing
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: bizflow-jaeger-dev
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: true
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+      - "6831:6831/udp"
+      - "6832:6832/udp"
+      - "5778:5778"
+    networks:
+      - bizflow-network
+
+  # VSCode Server - Desenvolvimento no browser
+  vscode:
+    image: codercom/code-server:latest
+    container_name: bizflow-vscode-dev
+    restart: unless-stopped
+    environment:
+      PASSWORD: ${VSCODE_PASSWORD:-vscode123}
+      SUDO_PASSWORD: ${VSCODE_PASSWORD:-vscode123}
+    volumes:
+      - ./:/home/coder/project:rw
+      - vscode_extensions:/home/coder/.local/share/code-server/extensions
+    ports:
+      - "8443:8080"
+    networks:
+      - bizflow-network
+    working_dir: /home/coder/project
