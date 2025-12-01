@@ -363,4 +363,13 @@ Subscription.afterUpdate(async (subscription, options) => {
     const daysRemaining = subscription.daysRemaining();
     
     if (daysRemaining <= 7 && daysRemaining > 0) {
-     
+      // Notificar sobre expiração em breve
+    }
+  }
+  
+  if (subscription.changed('status') && subscription.status === 'past_due') {
+    // Notificar sobre pagamento em atraso
+  }
+});
+
+module.exports = Subscription;
