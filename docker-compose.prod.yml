@@ -1,0 +1,430 @@
+version: '3.8'
+
+# Rede compartilhada
+networks:
+  bizflow-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# Volumes persistentes
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  uploads_data:
+    driver: local
+  logs_data:
+    driver: local
+  ssl_certs:
+    driver: local
+
+# Configurações comuns
+x-common-variables: &common-variables
+  TZ: America/Sao_Paulo
+  NODE_ENV: production
+  LOG_LEVEL: info
+
+x-database-variables: &database-variables
+  POSTGRES_DB: ${DB_NAME:-bizflow_prod}
+  POSTGRES_USER: ${DB_USER:-bizflow_user}
+  POSTGRES_PASSWORD: ${DB_PASSWORD:-}
+  POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+  PGDATA: /var/lib/postgresql/data/pgdata
+
+x-app-variables: &app-variables
+  <<: *common-variables
+  PORT: 3000
+  DB_HOST: postgres
+  DB_PORT: 5432
+  DB_NAME: ${DB_NAME:-bizflow_prod}
+  DB_USER: ${DB_USER:-bizflow_user}
+  DB_PASSWORD: ${DB_PASSWORD:-}
+  DB_SSL: ${DB_SSL:-false}
+  DB_POOL_MAX: 20
+  DB_POOL_MIN: 5
+  DB_POOL_ACQUIRE: 30000
+  DB_POOL_IDLE: 10000
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+  JWT_SECRET: ${JWT_SECRET}
+  JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+  JWT_ACCESS_EXPIRES_IN: 15m
+  JWT_REFRESH_EXPIRES_IN: 7d
+  FRONTEND_URL: ${FRONTEND_URL}
+  APP_URL: ${APP_URL:-https://api.bizflow.com}
+  SMTP_HOST: ${SMTP_HOST}
+  SMTP_PORT: ${SMTP_PORT}
+  SMTP_USER: ${SMTP_USER}
+  SMTP_PASS: ${SMTP_PASS}
+  SMTP_SECURE: ${SMTP_SECURE:-true}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+  WEBHOOK_SECRET: ${WEBHOOK_SECRET}
+  SENTRY_DSN: ${SENTRY_DSN}
+  NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+  NEW_RELIC_APP_NAME: bizflow-backend
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+  AWS_REGION: ${AWS_REGION:-us-east-1}
+  S3_BUCKET_NAME: ${S3_BUCKET_NAME}
+  CLOUDINARY_URL: ${CLOUDINARY_URL}
+  STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+  STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+  TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+  TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+  TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER}
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: bizflow-postgres-prod
+    restart: unless-stopped
+    environment:
+      <<: *database-variables
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+      - ./backups:/backups
+    ports:
+      - "${DB_EXTERNAL_PORT:-5432}:5432"
+    networks:
+      - bizflow-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-bizflow_user} -d ${DB_NAME:-bizflow_prod}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    command: >
+      postgres
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=4MB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+
+  # Redis Cache/Queue
+  redis:
+    image: redis:7-alpine
+    container_name: bizflow-redis-prod
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --appendonly yes
+      --appendfsync everysec
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_EXTERNAL_PORT:-6379}:6379"
+    networks:
+      - bizflow-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
+  # Aplicação Principal
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NODE_ENV: production
+        PORT: 3000
+    image: bizflow-backend:prod
+    container_name: bizflow-backend-prod
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *app-variables
+    ports:
+      - "3000:3000"
+      - "9229:9229" # Node.js debug port
+    volumes:
+      - uploads_data:/app/uploads
+      - logs_data:/app/logs
+      - ./src:/app/src:ro
+      - ./package.json:/app/package.json:ro
+      - ./server.js:/app/server.js:ro
+    networks:
+      - bizflow-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "
+        const http = require('http');
+        const options = {
+          hostname: 'localhost',
+          port: 3000,
+          path: '/health',
+          timeout: 5000
+        };
+        const req = http.request(options, (res) => {
+          if (res.statusCode === 200) {
+            let data = '';
+            res.on('data', (chunk) => data += chunk);
+            res.on('end', () => {
+              try {
+                const health = JSON.parse(data);
+                if (health.status === 'healthy' && health.database === 'connected') {
+                  process.exit(0);
+                } else {
+                  process.exit(1);
+                }
+              } catch {
+                process.exit(1);
+              }
+            });
+          } else {
+            process.exit(1);
+          }
+        });
+        req.on('error', () => process.exit(1));
+        req.end();
+      "]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1'
+        reservations:
+          memory: 256M
+          cpus: '0.5'
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+        window: 120s
+      placement:
+        constraints:
+          - node.role == worker
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+        tag: "bizflow-backend"
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: bizflow-nginx-prod
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./nginx/html:/usr/share/nginx/html:ro
+      - logs_data:/var/log/nginx
+    networks:
+      - bizflow-network
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+
+  # Monitoramento - Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: bizflow-prometheus-prod
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - bizflow-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Monitoramento - Grafana
+  grafana:
+    image: grafana/grafana:latest
+    container_name: bizflow-grafana-prod
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: "grafana-piechart-panel"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    ports:
+      - "3001:3000"
+    networks:
+      - bizflow-network
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Logs - ELK Stack (opcional)
+  elasticsearch:
+    image: elasticsearch:8.8.0
+    container_name: bizflow-elasticsearch-prod
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    networks:
+      - bizflow-network
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  logstash:
+    image: logstash:8.8.0
+    container_name: bizflow-logstash-prod
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/logstash/logstash.conf:/usr/share/logstash/pipeline/logstash.conf:ro
+    ports:
+      - "5000:5000"
+    networks:
+      - bizflow-network
+    depends_on:
+      - elasticsearch
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  kibana:
+    image: kibana:8.8.0
+    container_name: bizflow-kibana-prod
+    restart: unless-stopped
+    ports:
+      - "5601:5601"
+    networks:
+      - bizflow-network
+    depends_on:
+      - elasticsearch
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+
+  # Backup Automático
+  backup:
+    image: prodrigestivill/postgres-backup-local
+    container_name: bizflow-backup-prod
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${DB_NAME:-bizflow_prod}
+      POSTGRES_USER: ${DB_USER:-bizflow_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-}
+      SCHEDULE: "@daily"
+      BACKUP_KEEP_DAYS: 7
+      BACKUP_KEEP_WEEKS: 4
+      BACKUP_KEEP_MONTHS: 12
+      HEALTHCHECK_PORT: 8080
+    volumes:
+      - ./backups:/backups
+    networks:
+      - bizflow-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080"]
+      interval: 1h
+      timeout: 10s
+      retries: 3
+
+  # Certbot para SSL Automático
+  certbot:
+    image: certbot/certbot
+    container_name: bizflow-certbot-prod
+    restart: unless-stopped
+    volumes:
+      - ./nginx/ssl:/etc/letsencrypt
+      - ./nginx/html:/var/www/html
+    command: certonly --webroot --webroot-path=/var/www/html --email ${SSL_EMAIL} --agree-tos --no-eff-email --force-renewal -d ${DOMAIN} -d www.${DOMAIN}
+    networks:
+      - bizflow-network
+    depends_on:
+      - nginx
+
+volumes:
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  elasticsearch_data:
+    driver: local
