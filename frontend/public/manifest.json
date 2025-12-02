@@ -1,1 +1,39 @@
-
+{
+  "name": "BizFlow - Sistema de Gestão",
+  "short_name": "BizFlow",
+  "description": "Sistema completo de gestão empresarial integrado",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8f9fa",
+  "theme_color": "#4361ee",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "productivity", "finance"],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "description": "Acessar dashboard principal",
+      "url": "/dashboard"
+    },
+    {
+      "name": "Ponto de Venda",
+      "short_name": "POS",
+      "description": "Abrir ponto de venda",
+      "url": "/pos"
+    }
+  ]
+}
