@@ -1,0 +1,146 @@
+/* Print Styles */
+@media print {
+  @page {
+    margin: 0.5in;
+  }
+
+  body {
+    font-size: 12pt;
+    line-height: 1.4;
+    color: #000 !important;
+    background: #fff !important;
+  }
+
+  /* Hide unnecessary elements */
+  .no-print,
+  nav,
+  header,
+  footer,
+  .sidebar,
+  .btn,
+  .actions,
+  .modal,
+  .toast,
+  .notification {
+    display: none !important;
+  }
+
+  /* Show print-only elements */
+  .print-only {
+    display: block !important;
+  }
+
+  /* Force background colors */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+
+  /* Card styles for print */
+  .card {
+    border: 1px solid #000 !important;
+    box-shadow: none !important;
+    page-break-inside: avoid;
+    margin-bottom: 1rem;
+  }
+
+  /* Table styles for print */
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    page-break-inside: avoid;
+  }
+
+  th, td {
+    border: 1px solid #000 !important;
+    padding: 0.5rem;
+    text-align: left;
+  }
+
+  th {
+    background-color: #f0f0f0 !important;
+    font-weight: bold;
+  }
+
+  /* Link styles */
+  a {
+    color: #000 !important;
+    text-decoration: underline !important;
+  }
+
+  a[href]:after {
+    content: " (" attr(href) ")";
+    font-size: 0.9em;
+    font-weight: normal;
+  }
+
+  a[href^="#"]:after,
+  a[href^="javascript:"]:after {
+    content: "";
+  }
+
+  /* Invoice/Document specific */
+  .invoice-header,
+  .document-header {
+    text-align: center;
+    margin-bottom: 2rem;
+    border-bottom: 2px solid #000;
+    padding-bottom: 1rem;
+  }
+
+  .invoice-details,
+  .document-details {
+    margin-bottom: 2rem;
+  }
+
+  .total-row {
+    font-weight: bold;
+    background-color: #f0f0f0 !important;
+  }
+
+  /* Page breaks */
+  h1, h2, h3 {
+    page-break-after: avoid;
+  }
+
+  img {
+    max-width: 100% !important;
+    page-break-inside: avoid;
+  }
+
+  /* QR Code for invoices */
+  .qr-code-container {
+    border: 1px solid #000;
+    padding: 1rem;
+    text-align: center;
+    page-break-inside: avoid;
+  }
+
+  /* Signature area */
+  .signature-area {
+    margin-top: 3rem;
+    border-top: 1px dashed #000;
+    padding-top: 1rem;
+  }
+
+  /* Terms and conditions */
+  .terms {
+    font-size: 0.9em;
+    margin-top: 3rem;
+    border-top: 1px solid #000;
+    padding-top: 1rem;
+  }
+
+  /* Watermark for drafts */
+  .draft-watermark {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) rotate(-45deg);
+    font-size: 5em;
+    color: rgba(0, 0, 0, 0.1);
+    z-index: 9999;
+    pointer-events: none;
+  }
+}
